@@ -1,0 +1,313 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Sleeper Season Manager</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;padding:14px}
+h1{font-size:17px;margin-bottom:2px}
+.sub{color:#8b949e;font-size:12px;margin-bottom:12px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px;margin-bottom:12px}
+.card h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:#8b949e;margin-bottom:9px}
+.tabs{display:flex;gap:5px;margin-bottom:12px;flex-wrap:wrap}
+.tab{padding:6px 14px;border-radius:7px;background:#21262d;cursor:pointer;font-size:13px;border:1px solid transparent}
+.tab.on{background:#1f6feb;color:#fff}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:#8b949e;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:5px;border-bottom:1px solid #30363d}
+td{padding:5px;border-bottom:1px solid #21262d;vertical-align:top}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.pos{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;margin-right:5px;min-width:32px;text-align:center}
+.QB{background:#7c2d5c;color:#ffd9ef}.RB{background:#1b5e46;color:#c6f6d5}.WR{background:#1e4a7c;color:#cfe6ff}
+.TE{background:#7c5a1b;color:#ffe9bf}.K{background:#4a3f6b;color:#ddd5f5}.DEF{background:#5a3320;color:#ffd9c2}
+.slotlbl{display:inline-block;min-width:44px;color:#8b949e;font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+.up{color:#3fb950}.dn{color:#f85149}.warn{color:#d29922}.mut{color:#8b949e}
+.big{font-size:20px;font-weight:700;letter-spacing:-.3px}
+.pill{font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:6px}
+.pill.bye{background:#5a1d1d;color:#ffc7c2}
+.pill.inj{background:#4a3a12;color:#ffe08a}
+.pill.new{background:#12341f;color:#7ee787}
+.row{display:flex;gap:10px;align-items:flex-start;padding:9px;border-radius:8px;background:#0d1117;border:1px solid #30363d;margin-bottom:7px}
+.row.good{border-color:#3fb950;background:#11201a}
+.rank{font-size:17px;font-weight:700;color:#8b949e;min-width:20px;text-align:center}
+.row.good .rank{color:#3fb950}
+.why{font-size:11.5px;color:#adbac7;margin-top:4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+.arrow{color:#8b949e;padding:0 4px}
+#err{background:#3d1416;border:1px solid #f85149;border-radius:8px;padding:12px;margin-bottom:12px;display:none}
+.hint{color:#6e7681;font-size:11px;margin-top:8px;line-height:1.6}
+.bar{height:4px;background:#21262d;border-radius:2px;overflow:hidden;margin-top:4px}
+.bar>i{display:block;height:100%;background:#1f6feb}
+</style></head><body>
+<h1>Season Manager <span id="leaguename" style="color:#8b949e;font-weight:400"></span></h1>
+<div class="sub" id="setupline">Loading…</div>
+<div id="err"></div>
+<div class="tabs">
+  <div class="tab on" data-t="lineup">Lineup</div>
+  <div class="tab" data-t="waivers">Waivers</div>
+  <div class="tab" data-t="trades">Trades</div>
+</div>
+<div id="body"></div>
+<script src="config.local.js" onerror="void 0"></script>
+<script>
+const BOARD=__DATA__;
+const WEEKLY=__WEEKLY__;
+const Q=new URLSearchParams(location.search);
+const LC=(typeof window!=='undefined'&&window.DRAFT_CONFIG)||{};
+const LEAGUE=Q.get('league')||LC.league||'';
+const USERID=Q.get('user')||LC.user||'';
+const STARTERS=LC.starters||{QB:1,RB:2,WR:2,TE:1,FLEX:2,K:1,DEF:1};
+const FLEXOK=['RB','WR','TE'];
+const LASTWEEK=17;               // fantasy playoffs end wk17 in this league
+const API='https://api.sleeper.app/v1';
+
+/* ---------- value helpers ---------- */
+// Projection for one player in one week. null => bye or not projected.
+function wk(pid,w){const t=WEEKLY[String(w)];return t&&t[pid]?t[pid].p:null;}
+// Mean projection across a week range, skipping byes. This is "points per game
+// while playing", which is what a lineup decision actually turns on.
+function ros(pid,from,to){
+  let s=0,n=0;
+  for(let w=from;w<=to;w++){const v=wk(pid,w);if(v!=null){s+=v;n++;}}
+  return n?s/n:0;
+}
+function isBye(pid,w){return wk(pid,w)==null&&(BOARD[pid]||{}).bye===w;}
+
+/* ---------- optimal lineup ----------
+   Slots are nested (FLEX accepts RB/WR/TE, everything else is position-locked),
+   so filling locked slots greedily and then taking the best leftovers for FLEX
+   is provably optimal here -- no need to search combinations. */
+function optimal(pids,val){
+  const by={};
+  pids.forEach(p=>{const d=BOARD[p];if(!d)return;(by[d.p]=by[d.p]||[]).push(p);});
+  Object.keys(by).forEach(k=>by[k].sort((a,b)=>val(b)-val(a)));
+  const out=[],used=new Set();
+  for(const pos of ['QB','RB','WR','TE','K','DEF']){
+    for(let i=0;i<(STARTERS[pos]||0);i++){
+      const p=(by[pos]||[])[i];
+      out.push({slot:pos,pid:p||null});
+      if(p)used.add(p);
+    }
+  }
+  const pool=pids.filter(p=>BOARD[p]&&FLEXOK.includes(BOARD[p].p)&&!used.has(p))
+                 .sort((a,b)=>val(b)-val(a));
+  for(let i=0;i<(STARTERS.FLEX||0);i++){
+    const p=pool[i];out.push({slot:'FLEX',pid:p||null});if(p)used.add(p);
+  }
+  const total=out.reduce((s,x)=>s+(x.pid?val(x.pid):0),0);
+  return {lineup:out,total:total,bench:pids.filter(p=>!used.has(p))};
+}
+
+/* ---------- state ---------- */
+let ST={week:1,rosters:[],users:{},me:null,rostered:new Set()};
+const nm=p=>(BOARD[p]||{}).n||p;
+const ps=p=>(BOARD[p]||{}).p||'?';
+const tm=p=>(BOARD[p]||{}).t||'';
+const f1=v=>(v==null?'—':v.toFixed(1));
+const posSpan=p=>'<span class="pos '+ps(p)+'">'+ps(p)+'</span>';
+
+async function load(){
+  if(!LEAGUE){throw new Error('No league configured. Add ?league=<league_id>&user=<user_id> to the URL, or set league/user in config.local.js.');}
+  const [state,rosters,users]=await Promise.all([
+    fetch(API+'/state/nfl').then(r=>r.json()),
+    fetch(API+'/league/'+LEAGUE+'/rosters').then(r=>r.json()),
+    fetch(API+'/league/'+LEAGUE+'/users').then(r=>r.json())
+  ]);
+  ST.week=Math.min(Math.max(state.display_week||state.week||1,1),LASTWEEK);
+  ST.rosters=rosters;
+  users.forEach(u=>ST.users[u.user_id]=(u.metadata&&u.metadata.team_name)||u.display_name);
+  ST.me=rosters.find(r=>r.owner_id===USERID)||rosters.find(r=>String(r.roster_id)===String(LC.rosterId));
+  if(!ST.me)throw new Error('Could not find your roster in this league. Set "user" in config.local.js to your Sleeper user_id.');
+  rosters.forEach(r=>(r.players||[]).forEach(p=>ST.rostered.add(p)));
+}
+
+/* ---------- tab: lineup ---------- */
+function tabLineup(){
+  const w=ST.week, val=p=>wk(p,w)||0;
+  const mine=ST.me.players||[];
+  const opt=optimal(mine,val);
+  const cur=new Set((ST.me.starters||[]).filter(x=>x&&x!=='0'));
+  const optSet=new Set(opt.lineup.map(x=>x.pid).filter(Boolean));
+  const curTotal=[...cur].reduce((s,p)=>s+val(p),0);
+  const add=[...optSet].filter(p=>!cur.has(p));
+  const drop=[...cur].filter(p=>!optSet.has(p));
+  const byes=mine.filter(p=>isBye(p,w));
+
+  let h='<div class="grid2"><div>';
+  h+='<div class="card"><h2>Week '+w+' optimal lineup</h2>';
+  h+='<div class="big">'+opt.total.toFixed(1)+' <span style="font-size:12px;color:#8b949e;font-weight:400">projected points</span></div>';
+  if(cur.size)h+='<div class="sub" style="margin:4px 0 10px">Your current lineup: '+curTotal.toFixed(1)+
+     (opt.total-curTotal>0.05?' <span class="up">(+'+(opt.total-curTotal).toFixed(1)+' available)</span>':' <span class="up">— already optimal</span>')+'</div>';
+  h+='<table>';
+  opt.lineup.forEach(x=>{
+    h+='<tr><td><span class="slotlbl">'+x.slot+'</span>'+(x.pid?posSpan(x.pid)+nm(x.pid)+
+       (cur.has(x.pid)?'':'<span class="pill new">START</span>'):'<span class="mut">— empty —</span>')+
+       '</td><td class="mut">'+(x.pid?tm(x.pid):'')+'</td><td class="num">'+(x.pid?f1(val(x.pid)):'')+'</td></tr>';
+  });
+  h+='</table></div>';
+
+  if(add.length||drop.length){
+    h+='<div class="card"><h2>Changes to make</h2>';
+    add.forEach(p=>h+='<div class="row good"><div style="flex:1"><span class="up">START</span> '+posSpan(p)+nm(p)+' <span class="mut">'+tm(p)+'</span> <span class="num">'+f1(val(p))+'</span></div></div>');
+    drop.forEach(p=>h+='<div class="row"><div style="flex:1"><span class="dn">SIT</span> '+posSpan(p)+nm(p)+' <span class="mut">'+tm(p)+'</span> <span class="num">'+f1(val(p))+'</span>'+
+      (isBye(p,w)?'<span class="pill bye">BYE</span>':'')+'</div></div>');
+    h+='</div>';
+  }
+  h+='</div><div>';
+  h+='<div class="card"><h2>Bench</h2><table>';
+  opt.bench.sort((a,b)=>val(b)-val(a)).forEach(p=>{
+    h+='<tr><td>'+posSpan(p)+nm(p)+(isBye(p,w)?'<span class="pill bye">BYE</span>':'')+'</td><td class="mut">'+tm(p)+'</td><td class="num">'+f1(val(p))+'</td></tr>';
+  });
+  h+='</table></div>';
+  if(byes.length){
+    h+='<div class="card"><h2>On bye this week</h2>'+byes.map(p=>'<div>'+posSpan(p)+nm(p)+' <span class="mut">'+tm(p)+'</span></div>').join('')+'</div>';
+  }
+  h+='<div class="card"><h2>Upcoming byes</h2><table>';
+  const upcoming={};
+  (ST.me.players||[]).forEach(p=>{const b=(BOARD[p]||{}).bye;if(b&&b>=w)(upcoming[b]=upcoming[b]||[]).push(p);});
+  Object.keys(upcoming).map(Number).sort((a,b)=>a-b).forEach(b=>{
+    const list=upcoming[b];
+    h+='<tr><td>Week '+b+'</td><td>'+list.map(p=>posSpan(p)+nm(p)).join(' ')+'</td>'+
+       '<td class="num'+(list.length>=3?' warn':'')+'">'+list.length+'</td></tr>';
+  });
+  h+='</table></div></div></div>';
+  return h;
+}
+
+/* ---------- tab: waivers ---------- */
+function tabWaivers(){
+  const from=ST.week,val=p=>ros(p,from,LASTWEEK);
+  const mine=ST.me.players||[];
+  const base=optimal(mine,val);
+  const used=(ST.me.settings||{}).waiver_budget_used||0;
+  const budget=(LC.faab||100)-used;
+
+  // A free agent is only worth a claim if adding him (and dropping someone)
+  // raises the projected starting lineup. Bench depth that never starts is worth 0.
+  const fas=Object.keys(BOARD).filter(p=>!ST.rostered.has(p)&&val(p)>0);
+  const cand=[];
+  fas.forEach(fa=>{
+    let best=null;
+    mine.forEach(d=>{
+      const t=optimal(mine.filter(x=>x!==d).concat([fa]),val);
+      const g=t.total-base.total;
+      if(!best||g>best.gain)best={gain:g,drop:d};
+    });
+    if(best&&best.gain>0.15)cand.push({fa:fa,gain:best.gain,drop:best.drop,v:val(fa)});
+  });
+  cand.sort((a,b)=>b.gain-a.gain);
+  const top=cand.slice(0,12);
+
+  let h='<div class="card"><h2>Waiver targets — week '+ST.week+'</h2>';
+  h+='<div class="sub">FAAB remaining: <b>$'+budget+'</b> of $'+(LC.faab||100)+' · waivers process '+
+     ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][(LC.waiverDay!=null?LC.waiverDay:2)]+'</div>';
+  if(!top.length)h+='<div class="mut">No free agent improves your starting lineup right now. Nothing worth a bid.</div>';
+  top.forEach((c,i)=>{
+    // Bid scales with how much the pickup actually adds to your weekly lineup,
+    // capped so one claim never eats more than a third of the remaining budget.
+    const bid=Math.max(1,Math.min(Math.round(c.gain*9),Math.round(budget/3)));
+    h+='<div class="row'+(i?'':' good')+'"><div class="rank">'+(i+1)+'</div><div style="flex:1">'+
+      '<div>'+posSpan(c.fa)+'<b>'+nm(c.fa)+'</b> <span class="mut">'+tm(c.fa)+'</span>'+
+      ((BOARD[c.fa]||{}).inj?'<span class="pill inj">'+BOARD[c.fa].inj+'</span>':'')+'</div>'+
+      '<div class="why">rest-of-season <b>'+f1(c.v)+'</b> ppg · lineup gain <span class="up">+'+c.gain.toFixed(1)+
+      '</span>/wk · drop '+posSpan(c.drop)+nm(c.drop)+'</div></div>'+
+      '<div style="text-align:right"><div class="big">$'+bid+'</div><div class="mut" style="font-size:10px">suggested bid</div></div></div>';
+  });
+  h+='<div class="hint">Bid = lineup gain scaled to your remaining budget, capped at a third of it per claim. '+
+     'It is a starting point, not a market price — if two other teams need the same position, pay up.</div></div>';
+  return h;
+}
+
+/* ---------- tab: trades ---------- */
+function tabTrades(){
+  const from=ST.week,val=p=>ros(p,from,LASTWEEK);
+  const mine=ST.me.players||[];
+  const myBase=optimal(mine,val).total;
+  const myStart=new Set(optimal(mine,val).lineup.map(x=>x.pid).filter(Boolean));
+  const byTeam=[];
+
+  ST.rosters.forEach(o=>{
+    if(o.roster_id===ST.me.roster_id)return;
+    const theirs=o.players||[];
+    const theirBase=optimal(theirs,val).total;
+    const team=ST.users[o.owner_id]||('Roster '+o.roster_id);
+    const found=[];
+    const push=(g,r)=>{
+      const mg=optimal(mine.filter(x=>!g.includes(x)).concat(r),val).total-myBase;
+      const tg=optimal(theirs.filter(x=>!r.includes(x)).concat(g),val).total-theirBase;
+      // Tier 1: both sides gain. Tier 2: we gain, they are roughly flat -- those
+      // still get accepted when the other manager rates the players differently.
+      if(mg>0.3&&tg>-0.75)found.push({give:g,get:r,mg:mg,tg:tg,tier:tg>0.3?1:2,
+        cost:g.reduce((s,x)=>s+val(x),0)});
+    };
+    mine.forEach(a=>theirs.forEach(b=>push([a],[b])));
+    const mt=mine.slice().sort((x,y)=>val(y)-val(x)).slice(0,9);
+    const tt=theirs.slice().sort((x,y)=>val(y)-val(x)).slice(0,9);
+    for(let i=0;i<mt.length;i++)for(let j=i+1;j<mt.length;j++)
+      for(let k=0;k<tt.length;k++)for(let l=k+1;l<tt.length;l++)push([mt[i],mt[j]],[tt[k],tt[l]]);
+    // Equal-gain offers are not equal in practice: give up the cheaper package.
+    found.sort((a,b)=>(a.tier-b.tier)||(b.mg-a.mg)||(a.cost-b.cost)||(a.give.length-b.give.length));
+    const cnt={};(theirs).forEach(p=>{const q=ps(p);cnt[q]=(cnt[q]||0)+1;});
+    byTeam.push({team:team,offers:found.slice(0,2),n:found.length,shape:cnt,
+                 need:['QB','RB','WR','TE'].filter(q=>(cnt[q]||0)<=({QB:1,RB:4,WR:4,TE:1})[q])});
+  });
+  byTeam.sort((a,b)=>((b.offers[0]||{}).mg||-99)-((a.offers[0]||{}).mg||-99));
+
+  // Surplus = rostered players who never crack your optimal lineup. These are
+  // the pieces to spend; a third QB in a 1QB league contributes exactly zero.
+  const surplus=mine.filter(p=>!myStart.has(p)).sort((a,b)=>val(b)-val(a));
+
+  let h='<div class="card"><h2>Your tradeable surplus</h2>';
+  h+='<div class="sub">Players who do not crack your optimal lineup. Their value to you is what they fetch.</div>';
+  h+=surplus.map(p=>'<span style="display:inline-block;margin:0 8px 6px 0">'+posSpan(p)+nm(p)+
+     ' <span class="mut">'+f1(val(p))+'</span></span>').join('')||'<span class="mut">none</span>';
+  h+='</div>';
+
+  h+='<div class="card"><h2>Offers by team</h2>';
+  h+='<div class="sub">Best two per team. <span class="up">Tier 1</span> improves both starting lineups. '+
+     '<span class="warn">Tier 2</span> improves yours while theirs stays roughly flat — sendable, but expect a counter. '+
+     'Trade deadline: week '+(LC.tradeDeadline||11)+'.</div>';
+  byTeam.forEach(t=>{
+    h+='<div style="margin:12px 0 6px;font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.06em">'+
+       t.team+' <span class="mut" style="text-transform:none;letter-spacing:0">· '+
+       ['QB','RB','WR','TE'].map(q=>q+(t.shape[q]||0)).join(' ')+
+       (t.need.length?' · thin at '+t.need.join('/'):'')+'</span></div>';
+    if(!t.offers.length){h+='<div class="mut" style="font-size:12px;padding:2px 0 6px">no workable deal right now</div>';return;}
+    t.offers.forEach(o=>{
+      h+='<div class="row'+(o.tier===1?' good':'')+'"><div style="flex:1">'+
+        '<div><span class="dn">give</span> '+o.give.map(p=>posSpan(p)+nm(p)).join(' + ')+
+        '<span class="arrow">→</span><span class="up">get</span> '+o.get.map(p=>posSpan(p)+nm(p)).join(' + ')+'</div>'+
+        '<div class="why">you <span class="up">+'+o.mg.toFixed(1)+'</span> ppg · them '+
+        (o.tg>=0?'<span class="up">+'+o.tg.toFixed(1)+'</span>':'<span class="warn">'+o.tg.toFixed(1)+'</span>')+' ppg'+
+        (o.tier===2?' · <span class="warn">tier 2 — may need a sweetener</span>':'')+'</div>'+
+        '<div class="bar"><i style="width:'+Math.min(100,o.mg*14)+'%"></i></div></div></div>';
+    });
+  });
+  h+='<div class="hint">Gains are weekly starting-lineup points from now through week '+LASTWEEK+', '+
+     'assuming the other manager values players off the same projections — they will not. '+
+     'The model also has no injury-robustness term: trading away your only startable player at a position '+
+     'raises your ceiling and your risk at the same time.</div></div>';
+  return h;
+}
+
+/* ---------- render ---------- */
+const TABS={lineup:tabLineup,waivers:tabWaivers,trades:tabTrades};
+let active='lineup';
+function draw(){
+  document.querySelectorAll('.tab').forEach(t=>t.className='tab'+(t.dataset.t===active?' on':''));
+  try{document.getElementById('body').innerHTML=TABS[active]();}
+  catch(e){document.getElementById('body').innerHTML='<div class="card"><span class="dn">Render failed: '+e.message+'</span></div>';}
+}
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{active=t.dataset.t;draw();});
+
+load().then(()=>{
+  document.getElementById('leaguename').textContent=LC.name?('— '+LC.name):'';
+  const rec=(ST.me.settings||{});
+  document.getElementById('setupline').textContent=
+    'Week '+ST.week+' · '+(ST.users[ST.me.owner_id]||'your team')+' · '+
+    (ST.me.players||[]).length+' rostered · '+(rec.wins||0)+'-'+(rec.losses||0);
+  draw();
+}).catch(e=>{
+  const el=document.getElementById('err');
+  el.style.display='block';
+  el.innerHTML='<b>Could not load.</b><br>'+e.message;
+  document.getElementById('setupline').textContent='';
+});
+</script></body></html>

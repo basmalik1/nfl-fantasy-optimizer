@@ -1,10 +1,14 @@
 # NFL Fantasy Draft Pick Optimizer
 
-A live draft assistant for [Sleeper](https://sleeper.com). Polls the public Sleeper
-API every 4 seconds during your draft, tracks who's been taken, and ranks the best
-available pick for your roster.
+Two tools for a [Sleeper](https://sleeper.com) fantasy football league:
 
-No account, no API key, no install.
+- **`draft-assistant.html`** — live during your draft. Polls the API every 4 seconds,
+  tracks who's been taken, and ranks the best available pick.
+- **`season-manager.html`** — the rest of the season. Optimal weekly lineup, waiver
+  targets with FAAB bids, and trade offers worth sending.
+
+No account, no API key, no install. Sleeper's public API is read-only, so both tools
+recommend — they can't set a lineup or send a trade for you.
 
 ## Run
 
@@ -12,8 +16,9 @@ No account, no API key, no install.
 python -m http.server 8765 --bind 127.0.0.1
 ```
 
-Open <http://127.0.0.1:8765/draft-assistant.html>. Serve it over HTTP — the Sleeper
-request is blocked from a `file://` origin.
+Open <http://127.0.0.1:8765/draft-assistant.html> or
+<http://127.0.0.1:8765/season-manager.html>. Serve over HTTP — the Sleeper request is
+blocked from a `file://` origin.
 
 ## Point it at your league
 
@@ -25,7 +30,22 @@ Or copy `config.local.example.js` to `config.local.js` (gitignored) and fill it 
 Your league id is in the Sleeper URL; the draft id comes from
 `api.sleeper.app/v1/league/<league_id>`.
 
-## How it ranks players
+## Season manager
+
+- **Lineup** — fills your starting slots to maximise projected points for the current
+  week. Slots are nested (FLEX takes RB/WR/TE), so filling locked slots first and
+  taking the best leftovers for FLEX is provably optimal. Flags byes and shows which
+  weeks stack up.
+- **Waivers** — a free agent only appears if adding him *and dropping someone* raises
+  your projected starting lineup. Bench depth that never starts is worth zero. Suggests
+  a FAAB bid scaled to the gain, capped at a third of your remaining budget.
+- **Trades** — searches 1-for-1 and 2-for-2 swaps against every team. Tier 1 improves
+  both starting lineups; tier 2 improves yours while theirs stays flat. Ties go to the
+  cheaper package. It assumes the other manager values players off the same
+  projections, which they won't, and has no injury-robustness term — trading away your
+  only startable player at a position raises your ceiling and your risk together.
+
+## How the draft board ranks players
 
 Full-season and per-game — projected season points against last season's actuals.
 No week-1 or matchup weighting.
@@ -53,9 +73,11 @@ python src/build.py
 ## Layout
 
 ```
-draft-assistant.html      generated, self-contained — this is the app
-src/template.html         page source; __DATA__ is the injection point
-src/build.py              rebuilds the board from the Sleeper API
+draft-assistant.html      generated — draft-day tool
+season-manager.html       generated — in-season tool
+src/template.html         draft page source; __DATA__ is the injection point
+src/season-template.html  season page source
+src/build.py              rebuilds the board and renders both pages
 data/                     cached projections, byes, schedule
 ```
 

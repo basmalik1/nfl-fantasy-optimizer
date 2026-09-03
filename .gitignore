@@ -1,5 +1,9 @@
 # Local league configuration — keep private league/draft ids out of git
 config.local.js
 
+# Fetched at runtime. Contains leaguemates' usernames, user ids, team names and
+# their per-player nicknames — never commit this.
+data/league.json
+
 __pycache__/
 *.pyc

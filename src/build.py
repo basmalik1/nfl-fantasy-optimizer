@@ -67,7 +67,7 @@ def weekly(board):
         # playoff ratio measured at +/-1.5% across draftable players -> displayed, NOT scored
         d["po"]  = round(statistics.mean(po) / mu, 3) if (len(po) == 3 and mu > 0.5) else None
         d["opp"] = [weeks[w].get(pid, {}).get("o") for w in (15, 16, 17)] if len(po) == 3 else None
-    return byes
+    return byes, weeks
 
 def main():
     os.makedirs(DATA, exist_ok=True)
@@ -75,17 +75,34 @@ def main():
     board = season()
     print(f"  {len(board)} players")
     print("weekly projections (byes + playoff opponents)...")
-    byes = weekly(board)
+    byes, weeks = weekly(board)
     print(f"  {len(byes)} teams")
-    for name, obj in (("data.json", board), ("byes.json", byes)):
+    for name, obj in (("data.json", board), ("byes.json", byes), ("weekly.json", weeks)):
         with open(os.path.join(DATA, name), "w", encoding="utf-8") as f:
             json.dump(obj, f)
-    tmpl = open(os.path.join(ROOT, "src", "template.html"), encoding="utf-8").read()
-    html = tmpl.replace("__DATA__", json.dumps(board))
-    assert "__DATA__" not in html, "template placeholder not substituted"
-    out = os.path.join(ROOT, "draft-assistant.html")
-    open(out, "w", encoding="utf-8").write(html)
-    print(f"wrote {out} ({len(html)} bytes)")
+    render(board, weeks)
+
+
+def render(board=None, weeks=None):
+    """Inline the cached data into both pages."""
+    if board is None:
+        board = json.load(open(os.path.join(DATA, "data.json"), encoding="utf-8"))
+    if weeks is None:
+        weeks = json.load(open(os.path.join(DATA, "weekly.json"), encoding="utf-8"))
+    b = json.dumps(board)
+    for src, dst, subs in (
+        ("template.html",        "draft-assistant.html", {"__DATA__": b}),
+        ("season-template.html", "season-manager.html",  {"__DATA__": b,
+                                                          "__WEEKLY__": json.dumps(weeks)}),
+    ):
+        html = open(os.path.join(ROOT, "src", src), encoding="utf-8").read()
+        for k, v in subs.items():
+            html = html.replace(k, v)
+        for k in subs:
+            assert k not in html, f"{k} not substituted in {src}"
+        out = os.path.join(ROOT, dst)
+        open(out, "w", encoding="utf-8").write(html)
+        print(f"wrote {dst} ({len(html):,} bytes)")
 
 if __name__ == "__main__":
     main()
