@@ -1,4 +1,4 @@
-# NFL Fantasy Draft Pick Optimizer
+# NFL Fantasy Optimizer
 
 Two tools for a [Sleeper](https://sleeper.com) fantasy football league:
 
