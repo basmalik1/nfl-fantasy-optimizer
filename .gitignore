@@ -1,0 +1,5 @@
+# Local league configuration — keep private league/draft ids out of git
+config.local.js
+
+__pycache__/
+*.pyc

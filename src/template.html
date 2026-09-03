@@ -1,0 +1,228 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Sleeper Draft Assistant</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;padding:14px}
+h1{font-size:17px;margin-bottom:2px}
+.sub{color:#8b949e;font-size:12px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px;align-items:start}
+@media(max-width:1000px){.grid{grid-template-columns:1fr}}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px;margin-bottom:12px}
+.card h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:#8b949e;margin-bottom:9px}
+#clock{padding:14px;border-radius:10px;margin-bottom:12px;border:2px solid #30363d;background:#161b22}
+#clock.up{background:#1a2f1a;border-color:#3fb950;animation:pulse 1.1s infinite}
+#clock.soon{background:#2d2410;border-color:#d29922}
+@keyframes pulse{50%{opacity:.62}}
+#clockbig{font-size:23px;font-weight:700;letter-spacing:-.4px}
+#clocksub{color:#8b949e;font-size:12px;margin-top:3px}
+.rec{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:8px;background:#0d1117;border:1px solid #30363d;margin-bottom:7px}
+.rec.top{border-color:#3fb950;background:#11201a}
+.rank{font-size:19px;font-weight:700;color:#8b949e;min-width:22px;text-align:center;padding-top:1px}
+.rec.top .rank{color:#3fb950}
+.nm{font-weight:650;font-size:15px}
+.meta{color:#8b949e;font-size:11.5px;margin-top:2px}
+.why{font-size:11.5px;margin-top:4px;color:#adbac7}
+.pos{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;vertical-align:1px;margin-right:5px}
+.QB{background:#7c2d5c;color:#ffd9ef}.RB{background:#1b5e46;color:#c6f6d5}.WR{background:#1e4a7c;color:#cfe6ff}
+.TE{background:#7c5a1b;color:#ffe9bf}.K{background:#4a3f6b;color:#ddd5f5}.DEF{background:#5a3320;color:#ffd9c2}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:#8b949e;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:4px 5px;border-bottom:1px solid #30363d}
+td{padding:4px 5px;border-bottom:1px solid #21262d}
+tr.mine td{background:#11201a}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.up{color:#3fb950}.dn{color:#f85149}.warn{color:#d29922}
+.flag{font-size:10px;font-weight:700;padding:1px 4px;border-radius:3px;background:#5a1d1d;color:#ffc7c2;margin-left:5px}
+.tabs{display:flex;gap:5px;margin-bottom:9px;flex-wrap:wrap}
+.tab{padding:4px 10px;border-radius:6px;background:#21262d;cursor:pointer;font-size:11.5px;border:1px solid transparent}
+.tab.on{background:#1f6feb;color:#fff}
+#slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:5px}
+.slot{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:5px 7px;font-size:11.5px}
+.slot .lbl{color:#8b949e;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em}
+.slot.empty{border-style:dashed;opacity:.5}
+#status{font-size:11px;color:#8b949e;margin-top:9px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3fb950;margin-right:5px}
+.dot.err{background:#f85149}
+#runs{font-size:11.5px;color:#adbac7;line-height:1.7}
+.bar{height:3px;background:#21262d;border-radius:2px;overflow:hidden;margin-top:3px}
+.bar>i{display:block;height:100%;background:#1f6feb}
+</style></head><body>
+<h1>Sleeper Draft Assistant <span id="leaguename" style="color:#8b949e;font-weight:400"></span></h1>
+<div class="sub" id="setupline"></div>
+<div class="sub" style="margin:-6px 0 12px;color:#6e7681">Model: <b>full-season</b> — 2026 projected season pts/18 vs 2025 season pts/GP. No week-1, matchup, or schedule input. Sleeper assumes <b>18 GP for every player</b>, so injury risk is <b>not</b> in their numbers; the durability adjustment below is mine. Not included: bye weeks, playoff-week schedule.</div><div class="tabs" style="margin-bottom:10px"><div class="tab" id="m_season">Season-long (durability-adj)</div><div class="tab" id="m_rate">Rate only (Sleeper raw)</div></div><div id="clock"><div id="clockbig">Connecting…</div><div id="clocksub"></div></div>
+<div class="grid">
+ <div>
+  <div class="card"><h2>Recommended</h2><div id="recs"></div></div>
+  <div class="card"><h2>Best available</h2>
+   <div class="tabs" id="tabs"></div>
+   <table><thead><tr><th>Player</th><th>Tm</th><th class="num" title="2026 projected points per game">Proj</th><th class="num" title="durability-adjusted ppg">Adj</th><th class="num" title="2025 actual points per game">'25</th><th class="num">&Delta;</th><th class="num">VOR</th><th class="num" title="bye week">Bye</th><th class="num">ADP</th></tr></thead><tbody id="avail"></tbody></table>
+  </div>
+ </div>
+ <div>
+  <div class="card"><h2>My roster</h2><div id="slots"></div></div>
+  <div class="card"><h2>Bye weeks on my roster</h2><div id="byes"></div></div><div class="card"><h2>Position runs (last 10 picks)</h2><div id="runs"></div></div>
+  <div class="card"><h2>Recent picks</h2><table><tbody id="recent"></tbody></table></div>
+  <div id="status"></div>
+ </div>
+</div>
+<script src="config.local.js" onerror="void 0"></script>
+<script>
+const DATA=__DATA__;
+// Config resolution order: ?draft=..&slot=.. URL params, then config.local.js
+// (gitignored), then empty. No league identifiers are committed to this repo.
+// Find your ids in the Sleeper URL: /leagues/<league_id>/... ; the draft id comes
+// from GET https://api.sleeper.app/v1/league/<league_id> -> "draft_id".
+const Q=new URLSearchParams(location.search);
+const LC=(typeof window!=='undefined'&&window.DRAFT_CONFIG)||{};
+const num=(a,b,d)=>{const v=a!=null&&a!==''?a:(b!=null?b:d);const n=parseInt(v,10);return isNaN(n)?d:n;};
+const DRAFT=Q.get('draft')||LC.draft||'';
+const TEAMS=num(Q.get('teams'),LC.teams,10);
+const SLOT=num(Q.get('slot'),LC.slot,1);
+const ROUNDS=num(Q.get('rounds'),LC.rounds,15);
+const STARTERS=LC.starters||{QB:1,RB:2,WR:2,TE:1,FLEX:2,K:1,DEF:1};
+const REPL_RANK={QB:12,RB:30,WR:34,TE:12,K:11,DEF:11};
+const BASELINE=-1.77;
+
+const ids=Object.keys(DATA);
+ids.forEach(i=>DATA[i].id=i);
+const byPos=p=>ids.filter(i=>DATA[i].p===p).sort((a,b)=>DATA[b].pj-DATA[a].pj);
+const REPL={};
+for(const p in REPL_RANK){const l=byPos(p);const rid=l[Math.min(REPL_RANK[p]-1,l.length-1)];REPL[p]=rid?DATA[rid].pj:0;}
+window._mode=(window._mode||'season');
+ids.forEach(i=>{const d=DATA[i];
+  // Season-long availability. Projections give EVERY player 18 GP, so injury risk
+  // is NOT priced in by Sleeper. 2025 games-played, shrunk toward a full season,
+  // is an explicit (noisy) durability proxy. No 2025 sample => treated as healthy.
+  d.avail=(d.g25!=null&&d.g25>0)?Math.max(0.88,Math.min(1,+(((d.g25+34)/51)).toFixed(3))):1;
+  d.delta=(d.p25!=null)?+(d.pj-d.p25).toFixed(1):null;
+  d.out=/^(IR|PUP|NA|Out|Sus|DNR|COV)/i.test(d.inj)||(d.pj<5.5&&['RB','WR','TE','QB'].indexOf(d.p)>=0&&d.adp&&d.adp<200);
+  d.ques=/Quest|Doubt/i.test(d.inj);});
+function applyMode(){ids.forEach(i=>{const d=DATA[i];
+  d.sv=(window._mode==='season')?+(d.pj*d.avail).toFixed(2):d.pj;
+  d.vor=+(d.sv-REPL[d.p]).toFixed(2);});}
+applyMode();
+
+function myPicks(){const a=[];for(let r=1;r<=ROUNDS;r++){a.push((r-1)*TEAMS+(r%2?SLOT:TEAMS-SLOT+1));}return a;}
+const MINE=myPicks();
+
+function needs(roster){
+  const c={QB:0,RB:0,WR:0,TE:0,K:0,DEF:0};roster.forEach(p=>c[p.p]++);
+  const n={};for(const p in STARTERS){if(p==='FLEX')continue;n[p]=Math.max(0,STARTERS[p]-c[p]);}
+  const surplus=Math.max(0,c.RB-STARTERS.RB)+Math.max(0,c.WR-STARTERS.WR)+Math.max(0,c.TE-STARTERS.TE);
+  n.FLEX=Math.max(0,STARTERS.FLEX-surplus);
+  return {n:n,c:c};
+}
+function byeCount(roster,bye){return roster.filter(p=>p.bye===bye&&p.p!=='K'&&p.p!=='DEF').length;}
+function byePenalty(roster,d){
+  if(!d.bye||d.p==='K'||d.p==='DEF')return 0;
+  const c=byeCount(roster,d.bye)+1;      // count if we drafted him
+  if(c>=5)return 1.6;
+  if(c===4)return 0.8;
+  if(c===3)return 0.25;
+  return 0;
+}
+function needMult(pos,st,round){
+  const n=st.n,c=st.c;
+  if(pos==='K'||pos==='DEF'){if(round>=14)return n[pos]>0?1.6:0.05;return 0.02;}
+  if(round<=12&&c[pos]>=5)return 0.45;
+  let m=1;
+  if(n[pos]>0)m=1.35;else if(n.FLEX>0&&['RB','WR','TE'].indexOf(pos)>=0)m=1.1;else m=0.8;
+  if(pos==='QB'){if(c.QB>=1)return 0.12;if(round<=6)m=0.35;else if(round<=8)m=0.75;}
+  if(pos==='TE'&&c.TE>=1&&round<=12)m=0.5;
+  return m;
+}
+function render(picks,live){
+  const taken={};picks.forEach(p=>taken[String(p.player_id)]=1);
+  const roster=picks.filter(p=>p.draft_slot===SLOT).map(p=>DATA[String(p.player_id)]).filter(Boolean);
+  const made=picks.length;
+  let next=null;for(let i=0;i<MINE.length;i++){if(MINE[i]>made){next=MINE[i];break;}}
+  const round=next?Math.ceil(next/TEAMS):ROUNDS;
+  let after=null;for(let i=0;i<MINE.length;i++){if(MINE[i]>(next||0)){after=MINE[i];break;}}
+  const st=needs(roster);
+  const el=document.getElementById('clock'),big=document.getElementById('clockbig'),sub=document.getElementById('clocksub');
+  el.className='';
+  if(!next){big.textContent='Draft complete';sub.textContent=roster.length+' players rostered';}
+  else if(made+1===next){el.className='up';big.textContent="YOU'RE ON THE CLOCK — pick #"+next;sub.textContent='Round '+round+' · take the top recommendation';}
+  else{const away=next-made-1;el.className=away<=3?'soon':'';big.textContent=away+' pick'+(away===1?'':'s')+' until you';sub.textContent='Your next: #'+next+' (round '+round+')'+(after?' · then #'+after:'');}
+
+  const avail=ids.filter(i=>!taken[i]).sort((a,b)=>DATA[b].vor-DATA[a].vor);
+  const bestNow={},bestNext={};
+  avail.forEach(i=>{const d=DATA[i];if(d.out)return;
+    if(bestNow[d.p]===undefined)bestNow[d.p]=d.vor;
+    if(bestNext[d.p]===undefined&&after&&d.adp&&d.adp>after-2)bestNext[d.p]=d.vor;});
+
+  const scored=avail.map(function(i){const d=DATA[i];
+    let s=d.vor*needMult(d.p,st,round);
+    const bn=(bestNow[d.p]!==undefined?bestNow[d.p]:0);
+    const bx=(bestNext[d.p]!==undefined?bestNext[d.p]:bn-3);
+    const drop=bn-bx;
+    if(d.vor>=bn-0.35)s+=Math.max(0,drop)*0.55;
+    if(d.ques)s-=0.15;
+    const bp=byePenalty(roster,d); s-=bp;
+    if(d.out)s-=99;
+    if(d.delta!=null&&d.delta<BASELINE-2.5)s-=0.3;
+    if(d.delta!=null&&d.delta>BASELINE+2.0)s+=0.2;
+    if(next&&d.adp&&after&&d.adp>after+6)s-=1.1;
+    return {d:d,s:+s.toFixed(2),drop:+drop.toFixed(1),bp:bp};}).sort((a,b)=>b.s-a.s);
+
+  document.getElementById('recs').innerHTML=scored.slice(0,5).map(function(x,k){const d=x.d;const why=[];
+    if(x.bp>=0.25)why.push('<span class="warn">bye stack: '+(byeCount(roster,d.d?d.d.bye:d.bye)+1)+' starters out wk '+d.bye+'</span>');
+    if(window._mode==='season'&&d.avail<0.98)why.push('<span class="warn">durability: played '+d.g25+'/17 games in 2025 → '+Math.round(d.avail*100)+'% haircut</span>');
+    if(x.drop>1.2)why.push('<b>'+d.p+' cliff:</b> next-best '+d.p+' by your #'+(after||'?')+' is '+x.drop.toFixed(1)+' ppg worse');
+    if(st.n[d.p]>0)why.push('fills '+d.p+' starter');
+    if(d.delta!=null&&d.delta>BASELINE+1.5)why.push('<span class="up">projected up '+d.delta.toFixed(1)+" vs '25</span>");
+    if(d.delta!=null&&d.delta<BASELINE-2.5)why.push('<span class="dn">big markdown '+d.delta.toFixed(1)+'</span>');
+    if(d.ques)why.push('<span class="warn">'+d.inj+' — week-1 tag, minor over a full season</span>');
+    if(d.adp&&next&&d.adp<next-5)why.push('<span class="up">value: ADP '+d.adp+'</span>');
+    return '<div class="rec'+(k?'':' top')+'"><div class="rank">'+(k+1)+'</div><div style="flex:1">'+
+      '<div class="nm"><span class="pos '+d.p+'">'+d.p+'</span>'+d.n+(d.inj?'<span class="flag">'+d.inj+'</span>':'')+'</div>'+
+      '<div class="meta">'+d.t+' · '+(d.pj*18).toFixed(0)+' pts season ('+d.pj.toFixed(1)+'/gm) · VOR '+d.vor.toFixed(1)+(d.adp?' · ADP '+d.adp:'')+(d.bye?' | bye wk'+d.bye:'')+(d.opp?' | PO '+d.opp.join('/'):'')+'</div>'+
+      (why.length?'<div class="why">'+why.join(' · ')+'</div>':'')+'</div></div>';}).join('');
+
+  document.getElementById('m_season').className='tab'+(window._mode==='season'?' on':'');
+  document.getElementById('m_rate').className='tab'+(window._mode==='rate'?' on':'');
+  document.getElementById('m_season').onclick=function(){window._mode='season';applyMode();window._r();};
+  document.getElementById('m_rate').onclick=function(){window._mode='rate';applyMode();window._r();};
+  const f=window._filter||'ALL';
+  document.getElementById('tabs').innerHTML=['ALL','RB','WR','TE','QB','K','DEF'].map(p=>'<div class="tab'+(f===p?' on':'')+'" data-p="'+p+'">'+p+'</div>').join('');
+  Array.prototype.forEach.call(document.querySelectorAll('#tabs .tab'),function(t){t.onclick=function(){window._filter=t.getAttribute('data-p');window._r();};});
+  document.getElementById('avail').innerHTML=avail.filter(i=>f==='ALL'||DATA[i].p===f).slice(0,26).map(function(i){const d=DATA[i];
+    const dl=d.delta==null?'—':'<span class="'+(d.delta>BASELINE?'up':(d.delta<BASELINE-2.5?'dn':''))+'">'+(d.delta>0?'+':'')+d.delta.toFixed(1)+'</span>';
+    return '<tr><td><span class="pos '+d.p+'">'+d.p+'</span>'+d.n+(d.out?'<span class="flag">'+(d.inj||'NOT PLAYING')+'</span>':(d.inj?'<span class="flag">'+d.inj+'</span>':''))+'</td><td>'+d.t+'</td>'+
+      '<td class="num">'+d.pj.toFixed(1)+'</td><td class="num"><b>'+d.sv.toFixed(1)+'</b></td><td class="num">'+(d.p25!=null?d.p25:'—')+'</td><td class="num">'+dl+'</td><td class="num">'+d.vor.toFixed(1)+'</td><td class="num">'+(d.bye||'-')+'</td><td class="num">'+(d.adp!=null?d.adp:'—')+'</td></tr>';}).join('');
+
+  const order=['QB','RB','RB','WR','WR','TE','FLEX','FLEX','K','DEF'];const pool=roster.slice();const fill=[];
+  order.forEach(function(sl){let k=-1;
+    if(sl==='FLEX')k=pool.findIndex(p=>['RB','WR','TE'].indexOf(p.p)>=0);else k=pool.findIndex(p=>p.p===sl);
+    fill.push({sl:sl,pl:k>=0?pool.splice(k,1)[0]:null});});
+  pool.forEach(p=>fill.push({sl:'BN',pl:p}));
+  document.getElementById('slots').innerHTML=fill.map(x=>'<div class="slot'+(x.pl?'':' empty')+'"><div class="lbl">'+x.sl+'</div>'+(x.pl?x.pl.n:'—')+'</div>').join('');
+
+  const bc={};roster.forEach(p=>{if(p.bye&&p.p!=='K'&&p.p!=='DEF')bc[p.bye]=(bc[p.bye]||0)+1;});
+  const bke=Object.keys(bc).map(k=>[+k,bc[k]]).sort((a,b)=>a[0]-b[0]);
+  document.getElementById('byes').innerHTML=bke.length?bke.map(e=>
+    '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:12px'+(e[1]>=4?';color:#f85149;font-weight:700':(e[1]===3?';color:#d29922':''))+'">'+
+    '<span>Week '+e[0]+'</span><span>'+e[1]+' player'+(e[1]===1?'':'s')+(e[1]>=4?'  ← too many':(e[1]===3?'  ← watch':''))+'</span></div>').join('')
+    :'<span style="color:#8b949e;font-size:12px">no players yet</span>';
+  const last=picks.slice(-10);const cnt={};last.forEach(function(p){const d=DATA[String(p.player_id)];if(d)cnt[d.p]=(cnt[d.p]||0)+1;});
+  const ent=Object.keys(cnt).map(k=>[k,cnt[k]]).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('runs').innerHTML=ent.map(e=>'<div><span class="pos '+e[0]+'">'+e[0]+'</span> '+e[1]+'/'+last.length+(e[1]>=5?' <b class="warn">← run</b>':'')+'<div class="bar"><i style="width:'+(e[1]*10)+'%"></i></div></div>').join('')||'<span style="color:#8b949e">no picks yet</span>';
+  document.getElementById('recent').innerHTML=picks.slice(-9).reverse().map(function(p){
+    const m=p.metadata||{};const d=DATA[String(p.player_id)]||{n:((m.first_name||'')+' '+(m.last_name||'')).trim(),p:m.position||'?',t:m.team||''};
+    return '<tr'+(p.draft_slot===SLOT?' class="mine"':'')+'><td style="color:#8b949e;width:34px">'+p.pick_no+'</td><td><span class="pos '+d.p+'">'+d.p+'</span>'+d.n+'</td><td style="color:#8b949e">'+(d.t||'')+'</td></tr>';}).join('');
+  document.getElementById('status').innerHTML='<span class="dot'+(live?'':' err')+'"></span>'+(live?'live · ':'stale · ')+made+' picks · updated '+new Date().toLocaleTimeString();
+}
+let LAST=[];
+window._r=function(){render(LAST,true);};
+async function poll(){
+  try{const r=await fetch('https://api.sleeper.app/v1/draft/'+DRAFT+'/picks',{cache:'no-store'});
+    LAST=await r.json();render(LAST,true);}
+  catch(e){render(LAST,false);document.getElementById('status').innerHTML='<span class="dot err"></span>fetch failed: '+e.message;}
+}
+document.getElementById('leaguename').textContent=LC.name?('— '+LC.name):'';
+const slotOrd=['','1st','2nd','3rd'][SLOT]||(SLOT+'th');
+document.getElementById('setupline').textContent=DRAFT
+  ? TEAMS+'-team · pick '+slotOrd+' · '+ROUNDS+' rounds · '+Object.keys(STARTERS).map(k=>STARTERS[k]+k).join('/')
+  : 'No draft configured — add ?draft=<draft_id>&slot=<n>&teams=<n> to the URL, or create config.local.js (see README).';
+if(!DRAFT){document.getElementById('clockbig').textContent='No draft configured';
+  document.getElementById('clocksub').textContent='See README: pass ?draft=<draft_id> or add config.local.js';}
+else{poll();setInterval(poll,4000);}
+</script></body></html>
