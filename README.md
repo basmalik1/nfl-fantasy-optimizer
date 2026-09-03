@@ -13,12 +13,23 @@ recommend — they can't set a lineup or send a trade for you.
 ## Run
 
 ```
-python -m http.server 8765 --bind 127.0.0.1
+python src/run.py
 ```
 
-Open <http://127.0.0.1:8765/draft-assistant.html> or
-<http://127.0.0.1:8765/season-manager.html>. Serve over HTTP — the Sleeper request is
-blocked from a `file://` origin.
+Refreshes the projections if the cached board is more than 12 hours old, rebuilds both
+pages, starts a local server and opens the dashboard.
+
+```
+python src/run.py --force         # refetch regardless of cache age
+python src/run.py --no-refresh    # skip the network entirely
+python src/run.py --page draft    # open the draft assistant instead
+```
+
+If a refresh fails — network down, Sleeper having a moment — it warns and serves the
+cached board rather than leaving you with nothing before kickoff. Port 8765 by default,
+stepping to the next free one if it's taken.
+
+It has to be served over HTTP; the Sleeper request is blocked from a `file://` origin.
 
 ## Point it at your league
 
@@ -64,7 +75,7 @@ No week-1 or matchup weighting.
 Week 15–17 opponents are shown but not scored — the playoff-week variation is only
 about ±1.5%, too small to be a real signal.
 
-## Rebuild the board
+## Rebuild without serving
 
 ```
 python src/build.py
@@ -77,6 +88,7 @@ draft-assistant.html      generated — draft-day tool
 season-manager.html       generated — in-season tool
 src/template.html         draft page source; __DATA__ is the injection point
 src/season-template.html  season page source
+src/run.py                refresh + serve + open (start here)
 src/build.py              rebuilds the board and renders both pages
 data/                     cached projections, byes, schedule
 ```
