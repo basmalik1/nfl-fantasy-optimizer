@@ -12,6 +12,10 @@ recommend — they can't set a lineup or send a trade for you.
 
 ## Run
 
+On Windows, double-click **`season-manager.bat`** or **`draft-assistant.bat`**.
+
+Or from a terminal:
+
 ```
 python src/run.py
 ```
