@@ -59,6 +59,7 @@ Your league id is in the Sleeper URL; the draft id comes from
   cheaper package. It assumes the other manager values players off the same
   projections, which they won't, and has no injury-robustness term — trading away your
   only startable player at a position raises your ceiling and your risk together.
+- **Evaluate** — build a trade by clicking players and get a verdict: your lineup before and after, rest-of-season point swing, what it does to the other roster, which starters change, and whether it puts you over the roster cap. Use it to sanity-check an offer you received. Sleeper does not publish pending offers over its public API, so the offer has to be entered by hand.
 
 ## How the draft board ranks players
 

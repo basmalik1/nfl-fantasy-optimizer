@@ -35,6 +35,23 @@ td{padding:5px;border-bottom:1px solid #21262d;vertical-align:top}
 .hint{color:#6e7681;font-size:11px;margin-top:8px;line-height:1.6}
 .bar{height:4px;background:#21262d;border-radius:2px;overflow:hidden;margin-top:4px}
 .bar>i{display:block;height:100%;background:#1f6feb}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:760px){.cols{grid-template-columns:1fr}}
+.pk{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:4px 7px;border-radius:6px;
+    border:1px solid #30363d;background:#0d1117;margin-bottom:4px;cursor:pointer;font-size:12.5px;user-select:none}
+.pk:hover{border-color:#484f58}
+.pk.sel{border-color:#1f6feb;background:#10203a}
+.pk .v{color:#8b949e;font-variant-numeric:tabular-nums}
+.verdict{padding:12px;border-radius:9px;border:2px solid #30363d;background:#0d1117;margin-bottom:10px}
+.verdict .lab{font-size:21px;font-weight:700;letter-spacing:-.3px}
+.verdict.good{border-color:#3fb950;background:#11201a}
+.verdict.bad{border-color:#f85149;background:#2a1315}
+.verdict.even{border-color:#d29922;background:#241d0e}
+.swap{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin:8px 0;font-size:12.5px}
+.swap .side{padding:7px;border-radius:7px;background:#161b22;border:1px solid #30363d;min-height:34px}
+.btn{padding:4px 10px;border-radius:6px;background:#21262d;border:1px solid #30363d;cursor:pointer;font-size:11.5px;color:#e6edf3}
+.btn:hover{border-color:#484f58}
+.kv{display:flex;justify-content:space-between;padding:3px 0;font-size:12.5px;border-bottom:1px solid #21262d}
 </style></head><body>
 <h1>Season Manager <span id="leaguename" style="color:#8b949e;font-weight:400"></span></h1>
 <div class="sub" id="setupline">Loading…</div>
@@ -43,6 +60,7 @@ td{padding:5px;border-bottom:1px solid #21262d;vertical-align:top}
   <div class="tab on" data-t="lineup">Lineup</div>
   <div class="tab" data-t="waivers">Waivers</div>
   <div class="tab" data-t="trades">Trades</div>
+  <div class="tab" data-t="evaluate">Evaluate</div>
 </div>
 <div id="body"></div>
 <script src="config.local.js" onerror="void 0"></script>
@@ -287,8 +305,105 @@ function tabTrades(){
   return h;
 }
 
+/* ---------- tab: evaluate (manual trade builder) ----------
+   Sleeper does not expose PENDING trades over the public API, so an offer you
+   received has to be entered here by hand. Same valuation as the Trades tab:
+   each side is scored by what its own optimal starting lineup is worth. */
+let EV={partner:null,give:new Set(),get:new Set()};
+
+function evVerdict(d){
+  if(d>1.5) return ['good','Clear accept'];
+  if(d>0.4) return ['good','Worth doing'];
+  if(d>-0.4)return ['even','Lateral - basically a coin flip'];
+  if(d>-1.5)return ['bad','Lean decline'];
+  return ['bad','Clear decline'];
+}
+function pickRow(p,sel,side){
+  return '<div class="pk'+(sel?' sel':'')+'" data-ev="pick" data-side="'+side+'" data-pid="'+p+'">'+
+    '<span>'+posSpan(p)+nm(p)+'</span><span class="v">'+f1(ros(p,ST.week,LASTWEEK))+'</span></div>';
+}
+function tabEvaluate(){
+  const val=p=>ros(p,ST.week,LASTWEEK);
+  const mine=ST.me.players||[];
+  const others=ST.rosters.filter(r=>r.roster_id!==ST.me.roster_id);
+  if(!EV.partner&&others.length)EV.partner=String(others[0].roster_id);
+  const them=ST.rosters.find(r=>String(r.roster_id)===String(EV.partner));
+  const theirs=(them&&them.players)||[];
+  // Selections live outside the DOM because draw() replaces innerHTML wholesale.
+  const give=[...EV.give].filter(p=>mine.indexOf(p)>=0);
+  const get =[...EV.get ].filter(p=>theirs.indexOf(p)>=0);
+
+  const myBefore=optimal(mine,val).total;
+  const myAfterL=optimal(mine.filter(p=>give.indexOf(p)<0).concat(get),val);
+  const myAfter=myAfterL.total;
+  const thBefore=optimal(theirs,val).total;
+  const thAfter=optimal(theirs.filter(p=>get.indexOf(p)<0).concat(give),val).total;
+  // Round before display so a tiny negative never renders as "-0.0".
+  const md=Math.round((myAfter-myBefore)*10)/10, td=Math.round((thAfter-thBefore)*10)/10;
+  const weeksLeft=Math.max(0,LASTWEEK-ST.week+1);
+  const live=give.length||get.length;
+  const vd=live?evVerdict(md):['','Pick players to evaluate'];
+
+  let h='<div class="card"><h2>Evaluate a trade</h2>';
+  h+='<div class="sub">Click players to build the offer. Both sides are scored on rest-of-season starting-lineup '+
+     'points, so a bench player who never cracks your lineup is worth zero regardless of his name.</div>';
+
+  h+='<div class="verdict '+vd[0]+'"><div class="lab">'+vd[1]+'</div>';
+  if(live){
+    h+='<div class="swap"><div class="side">'+(give.map(p=>posSpan(p)+nm(p)).join('<br>')||'<span class="mut">nothing</span>')+'</div>'+
+       '<div class="arrow">&harr;</div>'+
+       '<div class="side">'+(get.map(p=>posSpan(p)+nm(p)).join('<br>')||'<span class="mut">nothing</span>')+'</div></div>';
+    h+='<div class="kv"><span>Your lineup</span><span>'+f1(myBefore)+' &rarr; <b>'+f1(myAfter)+'</b> ppg '+
+       '<span class="'+(md>=0?'up':'dn')+'">('+(md>=0?'+':'')+md.toFixed(1)+')</span></span></div>';
+    h+='<div class="kv"><span>Rest of season ('+weeksLeft+' wk)</span><span class="'+(md>=0?'up':'dn')+'">'+
+       (md>=0?'+':'')+(md*weeksLeft).toFixed(0)+' pts</span></div>';
+    h+='<div class="kv"><span>Their lineup</span><span>'+f1(thBefore)+' &rarr; '+f1(thAfter)+' ppg '+
+       '<span class="'+(td>=0?'up':'dn')+'">('+(td>=0?'+':'')+td.toFixed(1)+')</span></span></div>';
+    if(td>0.4&&md>0.4)h+='<div class="why">Both sides gain - the kind of deal that actually gets accepted.</div>';
+    else if(md>0.4&&td<-0.4)h+='<div class="why warn">You gain and they lose. Expect a counter rather than an acceptance.</div>';
+    else if(td>md+1.5)h+='<div class="why warn">They come out ahead of you here'+(td>0?'':' - they lose less than you do')+
+       '. Fine if you need the position, but they have the better end.</div>';
+    var cap=(LC.rosterSize||15), after=mine.length-give.length+get.length;
+    if(after>cap){
+      var bench=myAfterL.bench.slice().sort(function(a,b){return val(a)-val(b);});
+      h+='<div class="why warn">Roster would be '+after+'/'+cap+' - you must drop '+(after-cap)+
+         '. Cheapest cut: '+bench.slice(0,after-cap).map(p=>posSpan(p)+nm(p)).join(', ')+'</div>';
+    }
+    var sb={},sa={};
+    optimal(mine,val).lineup.forEach(function(x){if(x.pid)sb[x.pid]=1;});
+    myAfterL.lineup.forEach(function(x){if(x.pid)sa[x.pid]=1;});
+    var inn=Object.keys(sa).filter(p=>!sb[p]), out=Object.keys(sb).filter(p=>!sa[p]);
+    if(inn.length||out.length)
+      h+='<div class="why">Starters: '+(inn.length?'<span class="up">in</span> '+inn.map(p=>posSpan(p)+nm(p)).join(' '):'')+
+         (out.length?' <span class="dn">out</span> '+out.map(p=>posSpan(p)+nm(p)).join(' '):'')+'</div>';
+    var byes={};
+    mine.filter(p=>give.indexOf(p)<0).concat(get).forEach(function(p){
+      var b=(BOARD[p]||{}).bye;
+      if(b&&b>=ST.week&&ps(p)!=='K'&&ps(p)!=='DEF')byes[b]=(byes[b]||0)+1;});
+    var bad=Object.keys(byes).filter(b=>byes[b]>=4);
+    if(bad.length)h+='<div class="why warn">Leaves '+bad.map(b=>byes[b]+' players out in week '+b).join(', ')+'</div>';
+  }
+  h+='</div>';
+
+  h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">'+
+     '<span class="mut" style="font-size:12px">Trade with</span><select class="btn" data-ev="partner">'+
+     others.map(r=>'<option value="'+r.roster_id+'"'+(String(r.roster_id)===String(EV.partner)?' selected':'')+'>'+
+       (ST.users[r.owner_id]||('Roster '+r.roster_id))+'</option>').join('')+
+     '</select><button class="btn" data-ev="clear">Clear</button></div>';
+
+  h+='<div class="cols"><div><h2>You give</h2>'+
+     mine.slice().sort((a,b)=>val(b)-val(a)).map(p=>pickRow(p,EV.give.has(p),'give')).join('')+
+     '</div><div><h2>You get</h2>'+
+     (theirs.length?theirs.slice().sort((a,b)=>val(b)-val(a)).map(p=>pickRow(p,EV.get.has(p),'get')).join('')
+                   :'<span class="mut">no roster loaded</span>')+
+     '</div></div>';
+  h+='<div class="hint">Values are rest-of-season projected points per game, week '+ST.week+' through '+LASTWEEK+
+     '. Sleeper does not publish pending offers over its public API, so an offer you received must be entered by hand.</div></div>';
+  return h;
+}
+
 /* ---------- render ---------- */
-const TABS={lineup:tabLineup,waivers:tabWaivers,trades:tabTrades};
+const TABS={lineup:tabLineup,waivers:tabWaivers,trades:tabTrades,evaluate:tabEvaluate};
 let active='lineup';
 function draw(){
   document.querySelectorAll('.tab').forEach(t=>t.className='tab'+(t.dataset.t===active?' on':''));
@@ -296,6 +411,24 @@ function draw(){
   catch(e){document.getElementById('body').innerHTML='<div class="card"><span class="dn">Render failed: '+e.message+'</span></div>';}
 }
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{active=t.dataset.t;draw();});
+
+// Delegated: draw() replaces #body wholesale, which would drop direct handlers.
+document.getElementById('body').addEventListener('click',function(e){
+  var el=e.target.closest('[data-ev]');
+  if(!el)return;
+  var k=el.dataset.ev;
+  if(k==='pick'){
+    var set=el.dataset.side==='give'?EV.give:EV.get;
+    var pid=el.dataset.pid;
+    if(set.has(pid))set.delete(pid);else set.add(pid);
+    draw();
+  }else if(k==='clear'){EV.give.clear();EV.get.clear();draw();}
+});
+document.getElementById('body').addEventListener('change',function(e){
+  var el=e.target.closest('[data-ev="partner"]');
+  if(!el)return;
+  EV.partner=el.value;EV.get.clear();draw();
+});
 
 load().then(()=>{
   document.getElementById('leaguename').textContent=LC.name?('— '+LC.name):'';
