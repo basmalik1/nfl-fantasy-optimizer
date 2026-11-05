@@ -114,7 +114,7 @@ function optimal(pids,val){
 }
 
 /* ---------- state ---------- */
-let ST={week:1,rosters:[],users:{},me:null,rostered:new Set()};
+let ST={week:1,rosters:[],users:{},me:null,rostered:new Set(),cap:15,irSlots:0};
 const nm=p=>(BOARD[p]||{}).n||p;
 const ps=p=>(BOARD[p]||{}).p||'?';
 const tm=p=>(BOARD[p]||{}).t||'';
@@ -123,23 +123,34 @@ const posSpan=p=>'<span class="pos '+ps(p)+'">'+ps(p)+'</span>';
 
 async function load(){
   if(!LEAGUE){throw new Error('No league configured. Add ?league=<league_id>&user=<user_id> to the URL, or set league/user in config.local.js.');}
-  const [state,rosters,users]=await Promise.all([
+  const [state,rosters,users,league]=await Promise.all([
     fetch(API+'/state/nfl').then(r=>r.json()),
     fetch(API+'/league/'+LEAGUE+'/rosters').then(r=>r.json()),
-    fetch(API+'/league/'+LEAGUE+'/users').then(r=>r.json())
+    fetch(API+'/league/'+LEAGUE+'/users').then(r=>r.json()),
+    fetch(API+'/league/'+LEAGUE).then(r=>r.json())
   ]);
+  ST.cap=(league.roster_positions||[]).length||(LC.rosterSize||15);
+  ST.irSlots=(league.settings&&league.settings.reserve_slots)||0;
   ST.week=Math.min(Math.max(state.display_week||state.week||1,1),LASTWEEK);
   ST.rosters=rosters;
   users.forEach(u=>ST.users[u.user_id]=(u.metadata&&u.metadata.team_name)||u.display_name);
   ST.me=rosters.find(r=>r.owner_id===USERID)||rosters.find(r=>String(r.roster_id)===String(LC.rosterId));
   if(!ST.me)throw new Error('Could not find your roster in this league. Set "user" in config.local.js to your Sleeper user_id.');
-  rosters.forEach(r=>(r.players||[]).forEach(p=>ST.rostered.add(p)));
+  // players[] includes reserve (IR) and taxi. They are rostered -- so they stay
+  // in ST.rostered and are not free agents -- but they cannot start, cannot be
+  // dropped to open an active spot, and do not count against the roster cap.
+  rosters.forEach(r=>{
+    const res=r.reserve||[], tax=r.taxi||[];
+    r.ir=res.slice();
+    r.active=(r.players||[]).filter(p=>res.indexOf(p)<0&&tax.indexOf(p)<0);
+    (r.players||[]).forEach(p=>ST.rostered.add(p));
+  });
 }
 
 /* ---------- tab: lineup ---------- */
 function tabLineup(){
   const w=ST.week, val=p=>wk(p,w)||0;
-  const mine=ST.me.players||[];
+  const mine=ST.me.active||[];
   const opt=optimal(mine,val);
   const cur=new Set((ST.me.starters||[]).filter(x=>x&&x!=='0'));
   const optSet=new Set(opt.lineup.map(x=>x.pid).filter(Boolean));
@@ -174,12 +185,19 @@ function tabLineup(){
     h+='<tr><td>'+posSpan(p)+nm(p)+(isBye(p,w)?'<span class="pill bye">BYE</span>':'')+'</td><td class="mut">'+tm(p)+'</td><td class="num">'+f1(val(p))+'</td></tr>';
   });
   h+='</table></div>';
+  if((ST.me.ir||[]).length){
+    h+='<div class="card"><h2>On IR ('+ST.me.ir.length+'/'+ST.irSlots+' slots)</h2>'+
+       ST.me.ir.map(p=>'<div>'+posSpan(p)+nm(p)+' <span class="mut">'+tm(p)+'</span>'+
+         ((BOARD[p]||{}).inj?'<span class="pill inj">'+BOARD[p].inj+'</span>':'')+'</div>').join('')+
+       '<div class="hint">IR players cannot start and do not count against your '+ST.cap+
+       '-man roster. Dropping one frees an IR slot, not an active spot.</div></div>';
+  }
   if(byes.length){
     h+='<div class="card"><h2>On bye this week</h2>'+byes.map(p=>'<div>'+posSpan(p)+nm(p)+' <span class="mut">'+tm(p)+'</span></div>').join('')+'</div>';
   }
   h+='<div class="card"><h2>Upcoming byes</h2><table>';
   const upcoming={};
-  (ST.me.players||[]).forEach(p=>{const b=(BOARD[p]||{}).bye;if(b&&b>=w)(upcoming[b]=upcoming[b]||[]).push(p);});
+  (ST.me.active||[]).forEach(p=>{const b=(BOARD[p]||{}).bye;if(b&&b>=w)(upcoming[b]=upcoming[b]||[]).push(p);});
   Object.keys(upcoming).map(Number).sort((a,b)=>a-b).forEach(b=>{
     const list=upcoming[b];
     h+='<tr><td>Week '+b+'</td><td>'+list.map(p=>posSpan(p)+nm(p)).join(' ')+'</td>'+
@@ -192,7 +210,7 @@ function tabLineup(){
 /* ---------- tab: waivers ---------- */
 function tabWaivers(){
   const from=ST.week,val=p=>ros(p,from,LASTWEEK);
-  const mine=ST.me.players||[];
+  const mine=ST.me.active||[];
   const base=optimal(mine,val);
   const used=(ST.me.settings||{}).waiver_budget_used||0;
   const budget=(LC.faab||100)-used;
@@ -216,6 +234,14 @@ function tabWaivers(){
   let h='<div class="card"><h2>Waiver targets — week '+ST.week+'</h2>';
   h+='<div class="sub">FAAB remaining: <b>$'+budget+'</b> of $'+(LC.faab||100)+' · waivers process '+
      ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][(LC.waiverDay!=null?LC.waiverDay:2)]+'</div>';
+  const openIR=Math.max(0,(ST.irSlots||0)-((ST.me.ir||[]).length));
+  // A team defense is a unit, not a person -- it can never be IR-designated.
+  const stashable=mine.filter(p=>ps(p)!=='DEF'&&/^IR$/i.test((BOARD[p]||{}).inj||''));
+  if(openIR>0&&stashable.length){
+    h+='<div class="row good"><div style="flex:1"><b>Open a spot for free.</b> You have '+openIR+
+       ' empty IR slot'+(openIR===1?'':'s')+' and '+stashable.map(p=>posSpan(p)+nm(p)).join(', ')+
+       ' is IR-eligible. Move him to IR and you gain an active roster spot without dropping anyone.</div></div>';
+  }
   if(!top.length)h+='<div class="mut">No free agent improves your starting lineup right now. Nothing worth a bid.</div>';
   top.forEach((c,i)=>{
     // Bid scales with how much the pickup actually adds to your weekly lineup,
@@ -236,14 +262,14 @@ function tabWaivers(){
 /* ---------- tab: trades ---------- */
 function tabTrades(){
   const from=ST.week,val=p=>ros(p,from,LASTWEEK);
-  const mine=ST.me.players||[];
+  const mine=ST.me.active||[];
   const myBase=optimal(mine,val).total;
   const myStart=new Set(optimal(mine,val).lineup.map(x=>x.pid).filter(Boolean));
   const byTeam=[];
 
   ST.rosters.forEach(o=>{
     if(o.roster_id===ST.me.roster_id)return;
-    const theirs=o.players||[];
+    const theirs=o.active||[];
     const theirBase=optimal(theirs,val).total;
     const team=ST.users[o.owner_id]||('Roster '+o.roster_id);
     const found=[];
@@ -324,11 +350,11 @@ function pickRow(p,sel,side){
 }
 function tabEvaluate(){
   const val=p=>ros(p,ST.week,LASTWEEK);
-  const mine=ST.me.players||[];
+  const mine=ST.me.active||[];
   const others=ST.rosters.filter(r=>r.roster_id!==ST.me.roster_id);
   if(!EV.partner&&others.length)EV.partner=String(others[0].roster_id);
   const them=ST.rosters.find(r=>String(r.roster_id)===String(EV.partner));
-  const theirs=(them&&them.players)||[];
+  const theirs=(them&&them.active)||[];
   // Selections live outside the DOM because draw() replaces innerHTML wholesale.
   const give=[...EV.give].filter(p=>mine.indexOf(p)>=0);
   const get =[...EV.get ].filter(p=>theirs.indexOf(p)>=0);
@@ -363,7 +389,7 @@ function tabEvaluate(){
     else if(md>0.4&&td<-0.4)h+='<div class="why warn">You gain and they lose. Expect a counter rather than an acceptance.</div>';
     else if(td>md+1.5)h+='<div class="why warn">They come out ahead of you here'+(td>0?'':' - they lose less than you do')+
        '. Fine if you need the position, but they have the better end.</div>';
-    var cap=(LC.rosterSize||15), after=mine.length-give.length+get.length;
+    var cap=ST.cap, after=mine.length-give.length+get.length;  // active only; IR sits outside the cap
     if(after>cap){
       var bench=myAfterL.bench.slice().sort(function(a,b){return val(a)-val(b);});
       h+='<div class="why warn">Roster would be '+after+'/'+cap+' - you must drop '+(after-cap)+
@@ -435,7 +461,8 @@ load().then(()=>{
   const rec=(ST.me.settings||{});
   document.getElementById('setupline').textContent=
     'Week '+ST.week+' · '+(ST.users[ST.me.owner_id]||'your team')+' · '+
-    (ST.me.players||[]).length+' rostered · '+(rec.wins||0)+'-'+(rec.losses||0);
+    (ST.me.active||[]).length+'/'+ST.cap+' active'+((ST.me.ir||[]).length?' +'+ST.me.ir.length+' IR':'')+
+    ' · '+(rec.wins||0)+'-'+(rec.losses||0);
   draw();
 }).catch(e=>{
   const el=document.getElementById('err');
